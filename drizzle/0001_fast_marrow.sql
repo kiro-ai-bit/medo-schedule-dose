@@ -1,0 +1,1 @@
+CREATE INDEX "idx_doses_due_poll" ON "dose_occurrences" USING btree ("scheduled_at") WHERE "dose_occurrences"."outcome" = 'unmarked' AND "dose_occurrences"."skipped_by_user" = false;

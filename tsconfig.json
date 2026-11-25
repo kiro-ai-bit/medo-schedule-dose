@@ -1,0 +1,22 @@
+{
+  "extends": "@kiro-ai-bit/tsconfig/node.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["./Core/*"],
+      "@application/*": ["./Application/*"],
+      "@infrastructure/*": ["./Infrastructure/*"],
+      "@webapi/*": ["./WebAPI/*"]
+    },
+    "noEmit": true
+  },
+  "include": [
+    "Core/**/*.ts",
+    "Application/**/*.ts",
+    "Infrastructure/**/*.ts",
+    "WebAPI/**/*.ts",
+    "tests/**/*.ts",
+    "drizzle.config.ts",
+    "vitest.config.ts"
+  ]
+}
