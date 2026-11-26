@@ -17,8 +17,12 @@ import type { Queryable } from "@kiro-ai-bit/eventing";
 import type { PublisherHandle } from "@kiro-ai-bit/eventing";
 import {
   ensureScheduleDoseEventing,
+  startAccountDeletedConsumer,
+  startMedicineArchivedConsumer,
   startScheduleDosePublisher,
 } from "@infrastructure/Eventing/index.js";
+import { handleAccountDeleted } from "@application/AccountDeletion/handleAccountDeleted.js";
+import { handleMedicineArchived } from "@application/MedicineArchived/handleMedicineArchived.js";
 import { createJwksCache } from "@infrastructure/AuthzClient/jwks.js";
 import { createServiceTokenMinter } from "@infrastructure/AuthzClient/serviceToken.js";
 import {
@@ -45,7 +49,12 @@ import {
   registerDoseGeneration,
   type JobResult,
 } from "@application/Materialization/doseGeneration.js";
+import {
+  registerMissedLock,
+  type MissedLockResult,
+} from "@application/MissedLock/missedLock.js";
 import type { ScheduledTask } from "node-cron";
+import type { ConsumerHandle } from "@kiro-ai-bit/eventing";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -125,6 +134,10 @@ export interface BuiltApp {
   publisher?: PublisherHandle;
   doseGenerationTask?: ScheduledTask;
   doseGenerationRunOnce?: () => Promise<JobResult>;
+  missedLockTask?: ScheduledTask;
+  missedLockRunOnce?: () => Promise<MissedLockResult>;
+  accountDeletedConsumer?: ConsumerHandle;
+  medicineArchivedConsumer?: ConsumerHandle;
   close: () => Promise<void>;
 }
 
@@ -219,12 +232,16 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     broker: deps.brokerQueryable,
   });
 
+  const workerLogger = {
+    error: (m: string, meta?: Record<string, unknown>) =>
+      app.log.error({ meta }, m),
+  };
   const publisher = deps.startWorkers
     ? await startScheduleDosePublisher({
         service: deps.scheduleDoseQueryable,
         broker: deps.brokerQueryable,
         brokerDsn: deps.brokerDsn,
-        logger: { error: (m, meta) => app.log.error({ meta }, m) },
+        logger: workerLogger,
       })
     : undefined;
 
@@ -238,6 +255,50 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       })
     : undefined;
 
+  // missed-lock-tick — every minute; per-schedule tx inside runMissedLockTick
+  const missedLock = deps.startWorkers
+    ? registerMissedLock({
+        db: deps.db,
+        metrics,
+        reportError: (err) => app.log.error({ err }, "missed-lock-tick failed"),
+      })
+    : undefined;
+
+  const accountDeletedConsumer = deps.startWorkers
+    ? await startAccountDeletedConsumer({
+        service: deps.scheduleDoseQueryable,
+        broker: deps.brokerQueryable,
+        brokerDsn: deps.brokerDsn,
+        dispatch: (event) =>
+          handleAccountDeleted(
+            {
+              db: deps.db,
+              checkLinkCache: checkLinkClient.cache,
+              metrics,
+            },
+            { userId: event.userId as string },
+          ),
+        logger: workerLogger,
+      })
+    : undefined;
+  const medicineArchivedConsumer = deps.startWorkers
+    ? await startMedicineArchivedConsumer({
+        service: deps.scheduleDoseQueryable,
+        broker: deps.brokerQueryable,
+        brokerDsn: deps.brokerDsn,
+        dispatch: (event) =>
+          handleMedicineArchived(
+            { db: deps.db, metrics },
+            {
+              medicineId: event.medicineId as string,
+              patientId: event.patientId as string,
+              occurredAt: event.occurredAt as string,
+            },
+          ),
+        logger: workerLogger,
+      })
+    : undefined;
+
   return {
     app,
     db: deps.db,
@@ -246,8 +307,15 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     publisher,
     doseGenerationTask: doseGen?.task,
     doseGenerationRunOnce: doseGen?.runOnce,
+    missedLockTask: missedLock?.task,
+    missedLockRunOnce: missedLock?.runOnce,
+    accountDeletedConsumer,
+    medicineArchivedConsumer,
     close: async () => {
+      if (missedLock) missedLock.task.stop();
       if (doseGen) doseGen.task.stop();
+      if (accountDeletedConsumer) await accountDeletedConsumer.stop();
+      if (medicineArchivedConsumer) await medicineArchivedConsumer.stop();
       if (publisher) await publisher.stop();
       await app.close();
     },

@@ -296,6 +296,35 @@ export function createDoseOccurrencesRepo() {
           asc(doseOccurrences.doseSlot),
         );
     },
+    // §8.8 missed-lock — guarded transition: only unmarked, non-plan-skipped
+    // rows whose local_date precedes the schedule-local today. Single atomic
+    // UPDATE = the `outcome='unmarked'` guard; skipped_by_user rows are plan
+    // history and NEVER lock; snoozed rows lock (snooze never blocks).
+    async lockPriorDayUnmarked(
+      e: Db | DbTx,
+      scheduleId: string,
+      scheduleLocalToday: string,
+      now: Date,
+    ): Promise<DoseOccurrenceRow[]> {
+      return exec(e)
+        .update(doseOccurrences)
+        .set({
+          outcome: "missed",
+          actorId: null,
+          markedAt: now,
+          snoozedUntil: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(doseOccurrences.scheduleId, scheduleId),
+            eq(doseOccurrences.outcome, "unmarked"),
+            eq(doseOccurrences.skippedByUser, false),
+            sql`${doseOccurrences.localDate} < ${scheduleLocalToday}::date`,
+          ),
+        )
+        .returning();
+    },
     // §8.9 guarded outcome write — `outcome != 'missed'` guard makes the
     // missed-lock transition always win races; returns null when guarded out.
     async updateOutcome(
