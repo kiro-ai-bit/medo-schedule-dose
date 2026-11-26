@@ -54,6 +54,10 @@ export function createSchedulesRepo() {
         .where(eq(schedules.patientId, patientId))
         .orderBy(asc(schedules.createdAt), schedules.id);
     },
+    async findByIds(e: Db | DbTx, ids: string[]): Promise<ScheduleRow[]> {
+      if (ids.length === 0) return [];
+      return exec(e).select().from(schedules).where(inArray(schedules.id, ids));
+    },
     async listAll(e: Db | DbTx): Promise<ScheduleRow[]> {
       return exec(e).select().from(schedules).orderBy(asc(schedules.id));
     },
@@ -247,6 +251,97 @@ export function createDoseOccurrencesRepo() {
         )
         .returning({ id: doseOccurrences.id });
       return res.length;
+    },
+    // §8.7 — patient dose-window read: scheduled_at ∈ [from, to), optional
+    // exact outcome filter; ALL states incl. skipped_by_user/missed.
+    async findPatientWindow(
+      e: Db | DbTx,
+      patientId: string,
+      from: Date,
+      to: Date,
+      outcome?: string,
+    ): Promise<DoseOccurrenceRow[]> {
+      const conds = [
+        eq(doseOccurrences.patientId, patientId),
+        gte(doseOccurrences.scheduledAt, from),
+        sql`${doseOccurrences.scheduledAt} < ${to}`,
+      ];
+      if (outcome !== undefined) {
+        conds.push(eq(doseOccurrences.outcome, outcome));
+      }
+      return exec(e)
+        .select()
+        .from(doseOccurrences)
+        .where(and(...conds))
+        .orderBy(
+          asc(doseOccurrences.scheduledAt),
+          asc(doseOccurrences.doseSlot),
+        );
+    },
+    // §8.6 base set for /v1/doses/due — live unmarked rows only; archived
+    // suppression applied by caller (needs medicine+patient pair check).
+    async listDueBase(e: Db | DbTx, now: Date): Promise<DoseOccurrenceRow[]> {
+      return exec(e)
+        .select()
+        .from(doseOccurrences)
+        .where(
+          and(
+            eq(doseOccurrences.outcome, "unmarked"),
+            eq(doseOccurrences.skippedByUser, false),
+            sql`(${doseOccurrences.snoozedUntil} IS NULL OR ${doseOccurrences.snoozedUntil} <= ${now})`,
+          ),
+        )
+        .orderBy(
+          asc(doseOccurrences.scheduledAt),
+          asc(doseOccurrences.doseSlot),
+        );
+    },
+    // §8.9 guarded outcome write — `outcome != 'missed'` guard makes the
+    // missed-lock transition always win races; returns null when guarded out.
+    async updateOutcome(
+      e: Db | DbTx,
+      id: string,
+      fields: {
+        outcome: string;
+        actorId: string;
+        markedAt: Date;
+      },
+    ): Promise<DoseOccurrenceRow | null> {
+      const rows = await exec(e)
+        .update(doseOccurrences)
+        .set({
+          outcome: fields.outcome,
+          actorId: fields.actorId,
+          markedAt: fields.markedAt,
+          snoozedUntil: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(doseOccurrences.id, id),
+            sql`${doseOccurrences.outcome} != 'missed'`,
+          ),
+        )
+        .returning();
+      return rows[0] ?? null;
+    },
+    // §6 snooze — unmarked-only guarded write; repeat extends (overwrite).
+    async setSnooze(
+      e: Db | DbTx,
+      id: string,
+      snoozedUntil: Date,
+    ): Promise<DoseOccurrenceRow | null> {
+      const rows = await exec(e)
+        .update(doseOccurrences)
+        .set({ snoozedUntil, updatedAt: new Date() })
+        .where(
+          and(
+            eq(doseOccurrences.id, id),
+            eq(doseOccurrences.outcome, "unmarked"),
+          ),
+        )
+        .returning();
+      return rows[0] ?? null;
     },
     async deleteByPatientId(e: Db | DbTx, patientId: string): Promise<void> {
       await exec(e)

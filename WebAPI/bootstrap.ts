@@ -37,6 +37,8 @@ import {
   type MetricsImpl,
 } from "./Middleware/metrics.js";
 import { registerScheduleRoutes } from "./Public/schedules.js";
+import { registerDoseRoutes } from "./Public/doses.js";
+import { registerInternalDoseRoutes } from "./Internal/doses.js";
 import { registerPlatformRoutes } from "./Platform/routes.js";
 import { materializeSchedule } from "@application/Materialization/materialize.js";
 import {
@@ -56,6 +58,7 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().optional().default(""),
   CHECK_LINK_CACHE_TTL_MS: z.coerce.number().int().positive().optional(),
   MATERIALIZATION_HORIZON_DAYS: z.coerce.number().int().positive().optional(),
+  SNOOZE_DURATION_MINUTES: z.coerce.number().int().positive().optional(),
   PORT: z.coerce.number().int().positive().default(3004),
   LOG_LEVEL: z.string().default("info"),
   NODE_ENV: z
@@ -77,6 +80,7 @@ export interface AppConfig {
   sentryDsn: string;
   checkLinkCacheTtlMs: number;
   materializationHorizonDays: number;
+  snoozeDurationMinutes: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -98,6 +102,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sentryDsn: e.SENTRY_DSN,
     checkLinkCacheTtlMs: e.CHECK_LINK_CACHE_TTL_MS ?? CHECK_LINK_CACHE_TTL_MS,
     materializationHorizonDays: e.MATERIALIZATION_HORIZON_DAYS ?? 90,
+    snoozeDurationMinutes: e.SNOOZE_DURATION_MINUTES ?? 5,
   };
 }
 
@@ -190,6 +195,17 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     getMedicine: (medicineId) => medicineClient.getMedicine(medicineId),
     materialize,
     horizonDays: config.materializationHorizonDays,
+    metrics,
+  });
+  registerDoseRoutes(app, {
+    db: deps.db,
+    checkLink: checkLinkClient.checkLink,
+    metrics,
+    snoozeMinutes: config.snoozeDurationMinutes,
+  });
+  registerInternalDoseRoutes(app, {
+    db: deps.db,
+    checkLink: checkLinkClient.checkLink,
     metrics,
   });
   registerPlatformRoutes(app, {

@@ -78,6 +78,7 @@ export function makeConfig(
     sentryDsn: "",
     checkLinkCacheTtlMs: 15000,
     materializationHorizonDays: 90,
+    snoozeDurationMinutes: 5,
     ...overrides,
   };
 }

@@ -8,6 +8,8 @@ import { AuthError, DependencyError, ForbiddenError } from "./errors.js";
 declare module "fastify" {
   interface FastifyContextConfig {
     auth?: "user" | "service" | "either";
+    // LLD §11 — restrict which service issuers may satisfy this route.
+    authIssuers?: string[];
   }
   interface FastifyRequest {
     user?: UserClaims;
@@ -88,9 +90,11 @@ export function registerAuthn(app: FastifyInstance, deps: AuthnDeps): void {
 
   async function verifyService(
     token: string,
+    allowedIssuers?: string[],
   ): Promise<{ iss: string } | "wrongAud" | null> {
     let sawWrongAud = false;
     for (const [iss, jwks] of serviceKeySets) {
+      if (allowedIssuers && !allowedIssuers.includes(iss)) continue;
       try {
         const { payload } = await jwtVerify(token, jwks, { issuer: iss });
         const aud = payload.aud;
@@ -107,6 +111,7 @@ export function registerAuthn(app: FastifyInstance, deps: AuthnDeps): void {
   app.addHook("preValidation", async (request) => {
     const mode = request.routeOptions.config.auth;
     if (!mode) return;
+    const allowedIssuers = request.routeOptions.config.authIssuers;
     const token = bearerToken(request);
     if (!token)
       throw new AuthError(401, "UNAUTHORIZED", "missing bearer token");
@@ -114,7 +119,7 @@ export function registerAuthn(app: FastifyInstance, deps: AuthnDeps): void {
     if (mode === "either") {
       // Dual surface: service JWT → serviceCaller pass; user JWT → check-link
       // authz. Token class decides authz chain (sibling parity).
-      const svc = await verifyService(token);
+      const svc = await verifyService(token, allowedIssuers);
       if (svc && svc !== "wrongAud") {
         request.serviceCaller = svc.iss;
         return;
@@ -140,7 +145,7 @@ export function registerAuthn(app: FastifyInstance, deps: AuthnDeps): void {
     }
 
     // service
-    const svc = await verifyService(token);
+    const svc = await verifyService(token, allowedIssuers);
     if (svc && svc !== "wrongAud") {
       request.serviceCaller = svc.iss;
       return;
