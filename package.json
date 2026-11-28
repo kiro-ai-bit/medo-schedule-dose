@@ -2,7 +2,7 @@
   "name": "medo-schedule-dose",
   "version": "0.1.0",
   "private": true,
-  "description": "Medo Schedule & Dose Service — schedules, materialized dose rows, outcome lifecycle",
+  "description": "Medo Schedule & Dose Service \u2014 schedules, materialized dose rows, outcome lifecycle",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -18,9 +18,9 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@kiro-ai-bit/contracts": "file:../medo-shared/packages/contracts",
-    "@kiro-ai-bit/eventing": "file:../medo-shared/packages/eventing",
-    "@kiro-ai-bit/rate-limit": "file:../medo-shared/packages/rate-limit",
+    "@kiro-ai-bit/contracts": "0.1.0",
+    "@kiro-ai-bit/eventing": "0.1.0",
+    "@kiro-ai-bit/rate-limit": "0.1.0",
     "@sentry/node": "11.17.0",
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.8",
@@ -34,9 +34,9 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.3.14",
     "@eslint/js": "10.0.1",
-    "@kiro-ai-bit/eslint-config": "file:../medo-shared/packages/eslint-config",
-    "@kiro-ai-bit/test-utils": "file:../medo-shared/packages/test-utils",
-    "@kiro-ai-bit/tsconfig": "file:../medo-shared/packages/tsconfig",
+    "@kiro-ai-bit/eslint-config": "0.1.0",
+    "@kiro-ai-bit/test-utils": "0.1.0",
+    "@kiro-ai-bit/tsconfig": "0.1.0",
     "@types/luxon": "^3.7.6",
     "@types/node": "26.6.7",
     "@types/pg": "8.15.5",
